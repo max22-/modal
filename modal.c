@@ -2,6 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+
+/* Symbols / string interning ********************************************** */
+
+#define RESERVED(x) ((x) == 0) /* We intern reserved '<>' first, so that it has symbol number 0 */
+
 static char interned_strings_buffer[0x1000], *next_interned = interned_strings_buffer;
 
 typedef struct string {
@@ -43,6 +48,20 @@ void sym_print(symbol s) {
         printf("%c", strings[s].ptr[i]);
 }
 
+/* Tree struff ************************************************************* */
+
+struct node {
+    symbol sym;
+    unsigned int parent;
+};
+
+#define MAX_RULES 0x1000
+struct node lhs[MAX_RULES], rhs[MAX_RULES];
+unsigned int rules_count = 0;
+
+
+
+
 int main(int argc, char *argv[]) {
     if(argc != 2) {
         fprintf(stderr, "usage: %s file.modal\n", argv[0]);
@@ -50,10 +69,7 @@ int main(int argc, char *argv[]) {
     }
 
     intern("<>", 2);
-    intern("(", 1);
-    intern(")", 1);
-    intern("hello", 5);
-    intern("world", 5);
+
 
     for(int i = 0; i < string_count; i++) {
         sym_print(i);
