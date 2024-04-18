@@ -138,7 +138,7 @@ void tree_print(struct forest *forest, node_id id) {
     node_id parent = id;
     unsigned int level = 0;
     do { 
-        printf("parent = %d, new_parent = %d", parent, forest->parents[id]);
+        printf("parent = %d, new_parent = %d ", parent, forest->parents[id]);
         if(forest->parents[id] > parent) {
             level++;
             parent = forest->parents[id];
@@ -150,6 +150,7 @@ void tree_print(struct forest *forest, node_id id) {
             printf(" ");
         sym_print(forest->symbols[id]);
         printf("\n");
+        if(IS_ROOT(forest, id)) level++; /* first iteration of the loop */
         id++;
     } while(!IS_ROOT(forest, id) && id < forest->node_count);
 }
