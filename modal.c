@@ -80,6 +80,8 @@ void sym_print(symbol s) {
 
 /* Tree struff ************************************************************* */
 
+#define IS_ROOT(f, x) ((f)->parents[(x)] == (x))
+
 typedef int node_id;
 
 struct forest {
@@ -91,6 +93,13 @@ struct forest {
 
 struct forest rules_forest;
 struct forest arena1, arena2, *src = NULL, *dst = NULL;
+
+void swap_arenas() {
+    struct forest *tmp = src;
+    src = dst;
+    dst = tmp;
+    dst->node_count = 0;
+}
 
 struct forest alloc_forest(unsigned int nodes_max) {
     struct forest res;
@@ -121,7 +130,29 @@ node_id new_root_node(struct forest *forest, symbol sym) {
     return id;
 }
 
-#define IS_ROOT(f, x) ((f)->parents[(x)] == (x))
+void tree_print(struct forest *forest, node_id id) {
+    if(id >= forest->node_count)
+        ERROR("invalid node id");
+    if(!IS_ROOT(forest, id))
+        ERROR("expected a root node");
+    node_id parent = id;
+    unsigned int level = 0;
+    do { 
+        printf("parent = %d, new_parent = %d", parent, forest->parents[id]);
+        if(forest->parents[id] > parent) {
+            level++;
+            parent = forest->parents[id];
+        } else if(forest->parents[id] < parent) {
+            level--;
+            parent = forest->parents[id];
+        }
+        for(int i = 0; i < level * 4; i++)
+            printf(" ");
+        sym_print(forest->symbols[id]);
+        printf("\n");
+        id++;
+    } while(!IS_ROOT(forest, id) && id < forest->node_count);
+}
 
 typedef unsigned int rule_id;
 
@@ -252,14 +283,24 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     tokenize(f);
-    parse();
-
     fclose(f);
-
     for(int i = 0; i < src->node_count; i++) {
         sym_print(src->symbols[i]);
         printf("-");
     }
+    parse();
+    
+    swap_arenas();
+    printf("node count = %u\n", src->node_count);
+
+    for(node_id i = 0; i < src->node_count; i++) {
+        if(IS_ROOT(src, i)) {
+            printf("*********\n");
+            tree_print(src, i);
+        }
+    }
+
+    printf("\n");
     
 
     return 0;
