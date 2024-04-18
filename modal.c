@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #define ERROR(...) \
     do { \
@@ -130,11 +131,18 @@ node_id new_root_node(struct forest *forest, symbol sym) {
     return id;
 }
 
+size_t tree_size(struct forest *forest, node_id id) {
+    assert(id < forest->node_count && IS_ROOT(forest, id));
+    size_t res = 0;
+    do {
+        id++;
+        res++;
+    } while(id < forest->node_count && !IS_ROOT(forest, id));
+    return res;
+}
+
 void tree_print(struct forest *forest, node_id id) {
-    if(id >= forest->node_count)
-        ERROR("invalid node id");
-    if(!IS_ROOT(forest, id))
-        ERROR("expected a root node");
+    assert(id < forest->node_count && IS_ROOT(forest, id));
     node_id parent = id;
     unsigned int level = 0;
     do { 
@@ -153,6 +161,41 @@ void tree_print(struct forest *forest, node_id id) {
         if(IS_ROOT(forest, id)) level++; /* first iteration of the loop */
         id++;
     } while(!IS_ROOT(forest, id) && id < forest->node_count);
+}
+
+void tree_print_flat(struct forest *forest, node_id id) {
+    assert(id < forest->node_count && IS_ROOT(forest, id));
+    node_id old_parent = id;
+    size_t size = tree_size(forest, id);
+    for(unsigned int i = 0; i < size; i++) {
+        sym_print(forest->symbols[id+i]);
+            printf(" ");
+        node_id new_parent = forest->parents[id+i];
+        if(new_parent < old_parent) {
+            while(new_parent < old_parent) {
+                sym_print(CLOSE_PAREN);
+                printf(" ");
+                old_parent = forest->parents[old_parent];
+            }
+        }
+        old_parent = new_parent;
+    }
+    node_id n = id + size - 1;
+    while(!IS_ROOT(forest, n)) {
+        sym_print(CLOSE_PAREN);
+        printf(" ");
+        n = forest->parents[n];
+    }
+}
+
+
+node_id copy_tree(struct forest *destination, struct forest *source, node_id id) {
+    assert(id < source->node_count && IS_ROOT(source, id));
+    size_t size = tree_size(source, id);
+    node_id new_root = new_root_node(destination, source->symbols[id]);
+    for(unsigned int i = 1; i < size; i++)
+        new_child_node(destination, source->symbols[id+i], new_root + source->parents[id+i] - id);
+    return new_root;
 }
 
 typedef unsigned int rule_id;
@@ -250,6 +293,62 @@ void parse() {
     }
 }
 
+void parse_rules() {
+    unsigned int i = 0;
+    while(i < src->node_count) {
+        if(src->symbols[i] == DEFINE) {
+            rule_id r_id = new_rule();
+            i++;
+            rules.lhs[r_id] = copy_tree(&rules_forest, src, i);
+            i += tree_size(src, i);
+            rules.rhs[r_id] = copy_tree(&rules_forest, src, i);
+            i += tree_size(src, i);
+        } else {
+            copy_tree(dst, src, i);
+            i += tree_size(src, i);
+        }
+    }
+}
+
+int match(struct forest *f1, node_id id1, struct forest *f2, node_id id2) {
+    assert(id1 < f1->node_count && IS_ROOT(f1, id1));
+    assert(id2 < f2->node_count && IS_ROOT(f2, id2));
+    printf("match : ");
+    tree_print_flat(f1, id1);
+    printf(" <--> ");
+    tree_print_flat(f2, id2);
+    //printf("\n");
+    size_t size1 = tree_size(f1, id1), size2 = tree_size(f2, id2);
+    if(size1 != size2) {
+        printf(" : false (different size)\n");
+        return 0;
+    }
+    for(unsigned int i = 0; i < size1; i++) {
+        if(f1->symbols[id1 + i] != f2->symbols[id2 + i]) {
+            printf(" : false (different symbols)\n");
+            return 0;
+        }
+        if(f1->parents[id1 + i] - id1 != f2->parents[id2 + i] - id2) {
+            printf(": false (different structure)\n");;
+            return 0;
+        }
+    }
+    printf(" : true\n");
+    return 1;
+}
+
+void interpret() {
+    node_id id = 0;
+    while(id < src->node_count) {
+        for(rule_id r = 0; r < rules.count; r++) {
+            if(match(&rules_forest, rules.lhs[r], src, id)) {
+                copy_tree(dst, &rules_forest, rules.rhs[r]);
+            }
+        }
+        id += tree_size(src, id);
+    }
+}
+
 int main(int argc, char *argv[]) {
     if(argc != 2) {
         fprintf(stderr, "usage: %s file.modal\n", argv[0]);
@@ -292,7 +391,8 @@ int main(int argc, char *argv[]) {
     parse();
     
     swap_arenas();
-    printf("node count = %u\n", src->node_count);
+    parse_rules();
+    swap_arenas();
 
     for(node_id i = 0; i < src->node_count; i++) {
         if(IS_ROOT(src, i)) {
@@ -301,7 +401,28 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    printf("*** rules ***\n");
+    for(unsigned int i = 0; i < rules.count; i++) {
+        tree_print_flat(&rules_forest, rules.lhs[i]);
+        printf(" --> ");
+        tree_print_flat(&rules_forest, rules.rhs[i]);
+        printf("\n");
+    }
+
     printf("\n");
+
+    printf("Go !!\n");
+
+    interpret();
+    swap_arenas();
+    printf("output:\n");
+    for(node_id i = 0; i < src->node_count; i++) {
+        if(IS_ROOT(src, i)) {
+            printf("*********\n");
+            tree_print_flat(src, i);
+            printf("\n");
+        }
+    }
     
 
     return 0;
