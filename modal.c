@@ -2,6 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define ERROR(...) \
+    do { \
+        fprintf(stderr, "%s:%d: %s(): ", __FILE__, __LINE__, __func__); \
+        fprintf(stderr, __VA_ARGS__); \
+        fprintf(stderr, "\n"); \
+        exit(1); \
+    } while (0)
+
 #define MEMORY_SIZE 0x10000
 #define INTERNED_STRINGS_BUFFER_SIZE 0x1000
 #define STRING_COUNT_MAX 0x100
@@ -22,10 +30,8 @@ char memory[MEMORY_SIZE] = {0}, *next_free = memory;
 
 void *alloc(size_t size) {
     printf("allocating 0x%x bytes\n", size);
-    if(next_free - memory >= sizeof(memory)) {
-        fprintf(stderr, "out of memory\n");
-        exit(1);
-    }
+    if(next_free - memory >= sizeof(memory))
+        ERROR("out of memory\n");
     void *res = next_free;
     next_free += size;
     return res;
@@ -55,13 +61,10 @@ static symbol intern(const char *s, size_t len) {
         if(!strncmp(strings[i].ptr, s, len))
             return i;
     }
-    if(next_interned + len - interned_strings_buffer > INTERNED_STRINGS_BUFFER_SIZE) {  /* TODO: > or >= ?? */
-        fprintf(stderr, "Out of memory for interned strings\n");
-        exit(1);
-    }
-    if(string_count >= STRING_COUNT_MAX) {
-        fprintf(stderr, "Out of room for a new symbol\n");
-    }
+    if(next_interned + len - interned_strings_buffer > INTERNED_STRINGS_BUFFER_SIZE)  /* TODO: > or >= ?? */
+        ERROR("Out of memory for interned strings");
+    if(string_count >= STRING_COUNT_MAX)
+        ERROR("Out of space for a new symbol");
     memcpy(next_interned, s, len);
     strings[string_count] = (string){.ptr = next_interned, .len = len};
     next_interned += len;
@@ -69,10 +72,8 @@ static symbol intern(const char *s, size_t len) {
 }
 
 void sym_print(symbol s) {
-    if(s >= string_count) {
-        fprintf(stderr, "invalid symbol\n");
-        exit(1);
-    }
+    if(s >= string_count)
+        ERROR("invalid symbol");
     for(size_t i = 0; i < strings[s].len; i++)
         printf("%c", strings[s].ptr[i]);
 }
@@ -101,10 +102,8 @@ struct forest alloc_forest(unsigned int nodes_max) {
 }
 
 node_id new_node(struct forest *forest) {
-    if(forest->node_count >= forest->nodes_max) {
-        fprintf(stderr, "not enough free nodes\n");
-        exit(1);
-    }
+    if(forest->node_count >= forest->nodes_max)
+        ERROR("not enough free nodes\n");
     return forest->node_count++;
 }
 
@@ -140,8 +139,7 @@ void init_rules() {
 
 rule_id new_rule() {
     if(rules.count >= rules.count_max) {
-        fprintf(stderr, "not enough free rules\n");
-        exit(1);
+        ERROR("not enough free rules");
     }
     return rules.count++;
 }
@@ -160,10 +158,8 @@ void parse(FILE *f) {
             if(sym == OPEN_PAREN || sym == CLOSE_PAREN || sym == DEFINE) {
                 new_root_node(src, sym);
                 char_count = 0;
-                if(sym == DEFINE && look != ' ') {
-                    fprintf(stderr, "expected space after <>\n");
-                    exit(1);
-                }
+                if(sym == DEFINE && look != ' ')
+                    ERROR("expected space after <>");
             }
         } else if(char_count > 0) {
             new_root_node(src, intern(scratch, char_count));
