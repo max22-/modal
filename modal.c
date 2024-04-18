@@ -80,11 +80,11 @@ void sym_print(symbol s) {
 
 /* Tree struff ************************************************************* */
 
-typedef unsigned int node_id;
+typedef int node_id;
 
 struct forest {
     symbol *symbols;
-    unsigned int *parents;
+    node_id *parents;
     unsigned int node_count;
     unsigned int nodes_max;
 };
@@ -121,10 +121,12 @@ node_id new_root_node(struct forest *forest, symbol sym) {
     return id;
 }
 
+#define IS_ROOT(f, x) ((f)->parents[(x)] == (x))
+
 typedef unsigned int rule_id;
 
 struct rules {
-    unsigned int *lhs, *rhs;
+    node_id *lhs, *rhs;
     unsigned int count, count_max;
 };
 
@@ -145,32 +147,74 @@ rule_id new_rule() {
 }
 
 
-void parse(FILE *f) {
+void tokenize(FILE *f) {
     char scratch[SYMBOL_SIZE_MAX];
     size_t char_count = 0;
+    node_id current_parent = -1;
     int look = fgetc(f);
     while(look != EOF) {
-        printf("look = %c", look);
-        if(look != ' ') {
+        if(look != ' ' && look != '\n' && look != '(' && look != ')') {
             scratch[char_count++] = look;
             look = fgetc(f);
             symbol sym = intern(scratch, char_count);
-            if(sym == OPEN_PAREN || sym == CLOSE_PAREN || sym == DEFINE) {
+            if(sym == DEFINE) {
+                if(look != ' ')
+                    ERROR("expected space after <>");
+                new_root_node(src, sym);
+                char_count = 0;
+            }
+        } else {
+            if(char_count > 0) {
+                symbol sym = intern(scratch, char_count);
                 new_root_node(src, sym);
                 char_count = 0;
                 if(sym == DEFINE && look != ' ')
-                    ERROR("expected space after <>");
+                        ERROR("expected space after <>");
             }
-        } else if(char_count > 0) {
-            new_root_node(src, intern(scratch, char_count));
-            char_count = 0;
-            look = fgetc(f);
-        } else {
+            switch(look) {
+            case '(':
+                new_root_node(src, OPEN_PAREN);
+                break;
+            case ')':
+                new_root_node(src, CLOSE_PAREN);
+                break;
+            case ' ':
+            case '\n':
+                break;
+            default:
+                ERROR("unreachable");
+            }
             look = fgetc(f);
         }
+        
     }
     if(char_count > 0) {
         new_root_node(src, intern(scratch, char_count));
+    }
+}
+
+void parse() {
+    node_id current_parent = -1;
+    for(node_id i= 0; i < src->node_count; i++) {
+        symbol sym = src->symbols[i];
+        if(sym == OPEN_PAREN) {
+            if(current_parent == -1)
+                current_parent = new_root_node(dst, sym);
+            else
+                current_parent = new_child_node(dst, sym, current_parent);
+        } else if(sym == CLOSE_PAREN) {
+            if(current_parent == -1)
+                ERROR("unexpected ')'");
+            else if(IS_ROOT(dst, current_parent))
+                current_parent = -1;
+            else
+                current_parent = dst->parents[current_parent];
+        } else {
+            if(current_parent == -1)
+                new_root_node(dst, sym);
+            else
+                new_child_node(dst, sym, current_parent);
+        }
     }
 }
 
@@ -202,20 +246,13 @@ int main(int argc, char *argv[]) {
         intern(reg, 2);
     }
 
-    for(int i = 0; i < string_count; i++) {
-        sym_print(i);
-        printf("\n");
-    }
-
-    
-
-    
     FILE *f = fopen(argv[1], "r");
     if(!f) {
         perror("fopen");
         return 1;
     }
-    parse(f);
+    tokenize(f);
+    parse();
 
     fclose(f);
 

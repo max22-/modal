@@ -1,2 +1,4 @@
-<> hello bye
-hello world
+<> (car (?x ?y)) (?x)
+<> (cdr (?x ?y)) (?y)
+(car (1 (2 (3))))
+(cdr (1 (2 (3 (4)))))
