@@ -138,13 +138,13 @@ void tree_print(struct forest *forest, node_id id) {
     node_id parent = id;
     unsigned int level = 0;
     do { 
-        printf("parent = %d, new_parent = %d ", parent, forest->parents[id]);
-        if(forest->parents[id] > parent) {
+        node_id new_parent = forest->parents[id];
+        if(new_parent > parent) {
             level++;
-            parent = forest->parents[id];
-        } else if(forest->parents[id] < parent) {
+            parent = new_parent;
+        } else if(new_parent < parent) {
             level--;
-            parent = forest->parents[id];
+            parent = new_parent;
         }
         for(int i = 0; i < level * 4; i++)
             printf(" ");
