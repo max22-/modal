@@ -25,7 +25,7 @@
 #define OPEN_PAREN 1
 #define CLOSE_PAREN 2
 
-/* Buddy allocator */
+/* Bump allocator */
 
 char memory[MEMORY_SIZE] = {0}, *next_free = memory;
 
