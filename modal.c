@@ -18,12 +18,9 @@
 #define RULES_FOREST_NODES_MAX 0x100
 #define RULES_COUNT_MAX 0x100
 #define ARENA_NODES_MAX 0x200
+#define REGISTERS_FOREST_NODES_MAX 0x100
 
-/* */
 
-#define DEFINE 0
-#define OPEN_PAREN 1
-#define CLOSE_PAREN 2
 
 /* Bump allocator */
 
@@ -76,6 +73,12 @@ void sym_print(symbol s) {
     for(size_t i = 0; i < strings[s].len; i++)
         printf("%c", strings[s].ptr[i]);
 }
+
+/* Constants (calculated at runtime) */
+
+symbol DEFINE, OPEN_PAREN, CLOSE_PAREN, LAST_REGISTER;
+
+#define IS_REGISTER(x) ((x) <= LAST_REGISTER)
 
 /* Tree struff ************************************************************* */
 
@@ -130,12 +133,13 @@ node_id new_root_node(struct forest *forest, symbol sym) {
 }
 
 size_t tree_size(struct forest *forest, node_id id) {
-    assert(id < forest->node_count && IS_ROOT(forest, id));
+    assert(id < forest->node_count);
     size_t res = 0;
+    node_id i = id;
     do {
-        id++;
+        i++;
         res++;
-    } while(id < forest->node_count && !IS_ROOT(forest, id));
+    } while(i < forest->node_count && forest->parents[i] >= id && !IS_ROOT(forest, i));
     return res;
 }
 
@@ -162,7 +166,7 @@ void tree_print(struct forest *forest, node_id id) {
 }
 
 void tree_print_flat(struct forest *forest, node_id id) {
-    assert(id < forest->node_count && IS_ROOT(forest, id));
+    assert(id < forest->node_count);
     node_id old_parent = id;
     size_t size = tree_size(forest, id);
     for(unsigned int i = 0; i < size; i++) {
@@ -186,9 +190,26 @@ void tree_print_flat(struct forest *forest, node_id id) {
     }
 }
 
+void tree_print_raw(struct forest *forest, node_id id) {
+    assert(id < forest->node_count);
+    size_t size = tree_size(forest, id);
+    printf("IDs: ");
+    for(unsigned int i = 0; i < size; i++)
+        printf("%d ", id + i);
+    printf("\n");
+    printf("symbols: ");
+    for(unsigned int i = 0; i < size; i++)
+        sym_print(forest->symbols[id+i]);
+    printf("\n");
+    printf("parents: ");
+    for(unsigned int i = 0; i < size; i++)
+        printf("%d ", forest->parents[id+i]);
+    printf("\n");
+}
+
 
 node_id copy_tree(struct forest *destination, struct forest *source, node_id id) {
-    assert(id < source->node_count && IS_ROOT(source, id));
+    assert(id < source->node_count);
     size_t size = tree_size(source, id);
     node_id new_root = new_root_node(destination, source->symbols[id]);
     for(unsigned int i = 1; i < size; i++)
@@ -219,6 +240,20 @@ rule_id new_rule() {
     return rules.count++;
 }
 
+
+/* Registers *************************************************************** */
+
+struct forest registers_forest;
+
+node_id registers[256-33];
+
+void reset_registers() {
+    registers_forest.node_count = 0;
+    for(int i = 0; i <= LAST_REGISTER; i++)
+        registers[i] = -1;
+}
+
+/* ************************************************************************* */
 
 void tokenize(FILE *f) {
     char scratch[SYMBOL_SIZE_MAX];
@@ -308,6 +343,24 @@ void parse_rules() {
     }
 }
 
+int basic_match(struct forest *f1, node_id id1, struct forest *f2, node_id id2) {
+    assert(id1 < f1->node_count && IS_ROOT(f1, id1));
+    assert(id2 < f2->node_count);  
+    size_t size1 = tree_size(f1, id1), size2 = tree_size(f2, id2);
+    if(size1 != size2) return 0;
+    for(unsigned int i = 0; i < size1; i++) {
+        if(f1->symbols[id1 + i] != f2->symbols[id2 + i])
+            return 0;
+        if(i != 0) { /* Little fix because the root of a subtree would have a parent that does not match */
+            if(f1->parents[id1 + i] - id1 != f2->parents[id2 + i] - id2) {
+                printf(" STRUCTURE ERROR ");
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
 int match(struct forest *f1, node_id id1, struct forest *f2, node_id id2) {
     assert(id1 < f1->node_count && IS_ROOT(f1, id1));
     assert(id2 < f2->node_count && IS_ROOT(f2, id2));
@@ -317,18 +370,34 @@ int match(struct forest *f1, node_id id1, struct forest *f2, node_id id2) {
     tree_print_flat(f2, id2);
     //printf("\n");
     size_t size1 = tree_size(f1, id1), size2 = tree_size(f2, id2);
-    if(size1 != size2) {
-        printf(" : false (different size)\n");
-        return 0;
-    }
-    for(unsigned int i = 0; i < size1; i++) {
-        if(f1->symbols[id1 + i] != f2->symbols[id2 + i]) {
-            printf(" : false (different symbols)\n");
-            return 0;
-        }
-        if(f1->parents[id1 + i] - id1 != f2->parents[id2 + i] - id2) {
-            printf(": false (different structure)\n");;
-            return 0;
+    unsigned int i2 = 0;
+    for(unsigned int i1 = 0; i1 < size1; i1++) {
+        symbol sym = f1->symbols[id1+i1];
+        if(IS_REGISTER(sym)) {
+            if(registers[sym] == -1)
+                registers[sym] = copy_tree(&registers_forest, f2, id2 + i2);
+            else if(!basic_match(&registers_forest, registers[sym], f2, id2 + i2)) {
+                printf(" : false (register do not match : ");
+                sym_print(sym);
+                printf(") ");
+                printf("\n");
+                tree_print_raw(&registers_forest, registers[sym]);
+                printf(" <--> ");
+                tree_print_raw(f2, id2 + i2);
+                printf("\n");
+                return 0;
+            }
+            i2 += tree_size(f2, id2 + i2);
+        } else {
+            if(f1->symbols[id1 + i1] != f2->symbols[id2 + i2]) {
+                printf(" : false (different symbols)\n");
+                return 0;
+            }
+            if(f1->parents[id1 + i1] - id1 != f2->parents[id2 + i2] - id2) {
+                printf(" : false (different structure)\n");
+                return 0;
+            }
+            i2++;
         }
     }
     printf(" : true\n");
@@ -339,8 +408,10 @@ void interpret() {
     node_id id = 0;
     while(id < src->node_count) {
         for(rule_id r = 0; r < rules.count; r++) {
+            reset_registers();
             if(match(&rules_forest, rules.lhs[r], src, id)) {
                 copy_tree(dst, &rules_forest, rules.rhs[r]);
+                break;
             }
         }
         id += tree_size(src, id);
@@ -362,18 +433,24 @@ int main(int argc, char *argv[]) {
     src = &arena1;
     arena2 = alloc_forest(ARENA_NODES_MAX);
     dst = &arena2;
+    registers_forest = alloc_forest(REGISTERS_FOREST_NODES_MAX);
 
     init_rules();
 
-
-    intern("<>", 2);
-    intern("(", 1);
-    intern(")", 1);
     char reg[2] = {'?', 0};
-    for(int i = 33; i < 127; i++) {
+    for(int i = 33; i < 256; i++) {
         reg[1] = i;
-        intern(reg, 2);
+        symbol s = intern(reg, 2);
+        if(i == 255) LAST_REGISTER = s;
     }
+
+    reset_registers();
+
+    DEFINE = intern("<>", 2);
+    OPEN_PAREN = intern("(", 1);
+    CLOSE_PAREN = intern(")", 1);
+    
+    
 
     FILE *f = fopen(argv[1], "r");
     if(!f) {
