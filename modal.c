@@ -41,8 +41,6 @@ void *alloc(size_t size) {
 
 /* Symbols / string interning ********************************************** */
 
-#define RESERVED(x) ((x) == 0) /* We intern reserved '<>' first, so that it has symbol number 0 */
-
 static char *interned_strings_buffer = NULL, *next_interned = NULL;
 
 typedef struct string {
