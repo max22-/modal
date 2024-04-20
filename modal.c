@@ -170,8 +170,6 @@ void tree_print_flat(struct forest *forest, node_id id) {
     node_id old_parent = id;
     size_t size = tree_size(forest, id);
     for(unsigned int i = 0; i < size; i++) {
-        sym_print(forest->symbols[id+i]);
-            printf(" ");
         node_id new_parent = forest->parents[id+i];
         if(new_parent < old_parent) {
             while(new_parent < old_parent) {
@@ -180,6 +178,9 @@ void tree_print_flat(struct forest *forest, node_id id) {
                 old_parent = forest->parents[old_parent];
             }
         }
+        sym_print(forest->symbols[id+i]);
+        printf(" ");
+        
         old_parent = new_parent;
     }
     node_id n = id + size - 1;
@@ -198,8 +199,10 @@ void tree_print_raw(struct forest *forest, node_id id) {
         printf("%d ", id + i);
     printf("\n");
     printf("symbols: ");
-    for(unsigned int i = 0; i < size; i++)
+    for(unsigned int i = 0; i < size; i++) {
         sym_print(forest->symbols[id+i]);
+        printf(" ");
+    }
     printf("\n");
     printf("parents: ");
     for(unsigned int i = 0; i < size; i++)
@@ -212,7 +215,7 @@ node_id copy_tree(struct forest *destination, struct forest *source, node_id id)
     assert(id < source->node_count);
     size_t size = tree_size(source, id);
     node_id new_root = new_root_node(destination, source->symbols[id]);
-    for(unsigned int i = 1; i < size; i++)
+    for(unsigned int i = 1; i < size; i++) /* important : we start at 1 because the root node is created before */
         new_child_node(destination, source->symbols[id+i], new_root + source->parents[id+i] - id);
     return new_root;
 }
@@ -404,18 +407,54 @@ int match(struct forest *f1, node_id id1, struct forest *f2, node_id id2) {
     return 1;
 }
 
-void interpret() {
-    node_id id = 0;
-    while(id < src->node_count) {
-        for(rule_id r = 0; r < rules.count; r++) {
-            reset_registers();
-            if(match(&rules_forest, rules.lhs[r], src, id)) {
-                copy_tree(dst, &rules_forest, rules.rhs[r]);
-                break;
-            }
+node_id copy_rhs_tree(rule_id r_id) {
+    assert(r_id < rules.count);
+    node_id id = rules.rhs[r_id];
+    assert(id < rules_forest.node_count);
+    size_t size = tree_size(&rules_forest, id);
+    node_id new_root = new_root_node(dst, rules_forest.symbols[id]);
+    node_id current_parent = new_root;
+    for(unsigned int i = 1; i < size; i++) { /* important : we start at 1 because the root node is created before */
+        symbol sym = rules_forest.symbols[id+i];
+        if(IS_REGISTER(sym) && registers[sym] != -1) {
+            node_id subtree_id = copy_tree(dst, &registers_forest, registers[sym]);
+            dst->parents[subtree_id] = current_parent;
+        } else {
+            current_parent = new_root + rules_forest.parents[id+i] - id;
+            new_child_node(dst, rules_forest.symbols[id+i], current_parent);
         }
-        id += tree_size(src, id);
     }
+    return new_root;
+}
+
+void interpret() {
+    int rewritten = 0;
+    do {
+        node_id id = 0;
+        while(id < src->node_count) {
+            rewritten = 0;
+            for(rule_id r = 0; r < rules.count; r++) {
+                reset_registers();
+                if(match(&rules_forest, rules.lhs[r], src, id)) {
+                    printf("copying rhs : \n");
+                    tree_print_raw(&rules_forest, rules.rhs[r]);
+                    printf("\n");
+                    copy_rhs_tree(r);
+                    rewritten = 1;
+                    break;
+                }
+                    
+            }
+            if(!rewritten) {
+                printf("raw copying : \n");
+                tree_print_flat(src, id);
+                printf("\n");
+                copy_tree(dst, src, id);
+            }
+            id += tree_size(src, id);
+        }
+        swap_arenas();
+    } while(rewritten);
 }
 
 int main(int argc, char *argv[]) {
@@ -463,12 +502,14 @@ int main(int argc, char *argv[]) {
         sym_print(src->symbols[i]);
         printf("-");
     }
+    printf("\n");
     parse();
     
     swap_arenas();
     parse_rules();
     swap_arenas();
 
+    printf("Input : \n");
     for(node_id i = 0; i < src->node_count; i++) {
         if(IS_ROOT(src, i)) {
             printf("*********\n");
@@ -489,7 +530,6 @@ int main(int argc, char *argv[]) {
     printf("Go !!\n");
 
     interpret();
-    swap_arenas();
     printf("output:\n");
     for(node_id i = 0; i < src->node_count; i++) {
         if(IS_ROOT(src, i)) {
