@@ -171,11 +171,13 @@ void tree_print_flat(struct forest *forest, node_id id) {
     size_t size = tree_size(forest, id);
     for(unsigned int i = 0; i < size; i++) {
         node_id new_parent = forest->parents[id+i];
-        if(new_parent < old_parent) {
-            while(new_parent < old_parent) {
-                sym_print(CLOSE_PAREN);
-                printf(" ");
-                old_parent = forest->parents[old_parent];
+        if(i != 0) {
+            if(new_parent < old_parent) {
+                while(new_parent < old_parent) {
+                    sym_print(CLOSE_PAREN);
+                    printf(" ");
+                    old_parent = forest->parents[old_parent];
+                }
             }
         }
         sym_print(forest->symbols[id+i]);
@@ -207,6 +209,24 @@ void tree_print_raw(struct forest *forest, node_id id) {
     printf("parents: ");
     for(unsigned int i = 0; i < size; i++)
         printf("%d ", forest->parents[id+i]);
+    printf("\n");
+}
+
+void forest_print_raw(struct forest *forest) {
+    size_t node_count = forest->node_count;
+    printf("IDs:     ");
+    for(unsigned int i = 0; i < node_count; i++)
+        printf("%d ", i);
+    printf("\n");
+    printf("symbols: ");
+    for(unsigned int i = 0; i < node_count; i++) {
+        sym_print(forest->symbols[i]);
+        printf(" ");
+    }
+    printf("\n");
+    printf("parents: ");
+    for(unsigned int i = 0; i < node_count; i++)
+        printf("%d ", forest->parents[i]);
     printf("\n");
 }
 
@@ -366,7 +386,7 @@ int basic_match(struct forest *f1, node_id id1, struct forest *f2, node_id id2) 
 
 int match(struct forest *f1, node_id id1, struct forest *f2, node_id id2) {
     assert(id1 < f1->node_count && IS_ROOT(f1, id1));
-    assert(id2 < f2->node_count && IS_ROOT(f2, id2));
+    assert(id2 < f2->node_count);
     printf("match : ");
     tree_print_flat(f1, id1);
     printf(" <--> ");
@@ -396,9 +416,15 @@ int match(struct forest *f1, node_id id1, struct forest *f2, node_id id2) {
                 printf(" : false (different symbols)\n");
                 return 0;
             }
-            if(f1->parents[id1 + i1] - id1 != f2->parents[id2 + i2] - id2) {
-                printf(" : false (different structure)\n");
-                return 0;
+            if(i1 != 0) {
+                if(f1->parents[id1 + i1] - id1 != f2->parents[id2 + i2] - id2) {
+                    printf(" : false (different structure: i1 = %d, i2 = %d)\n", i1, i2);
+                    tree_print_raw(f1, id1);
+                    printf("\n");
+                    tree_print_raw(f2, id2);
+                    exit(1);
+                    return 0;
+                }
             }
             i2++;
         }
@@ -427,10 +453,15 @@ node_id copy_rhs_tree(rule_id r_id) {
     return new_root;
 }
 
+node_id *rewrite_node_map = NULL;
+
 void interpret() {
     int rewritten = 0;
     do {
         node_id id = 0;
+        node_id current_parent = 0;
+        for(int i = 0 ; i < ARENA_NODES_MAX; i++)
+            rewrite_node_map[i] = i;
         while(id < src->node_count) {
             rewritten = 0;
             for(rule_id r = 0; r < rules.count; r++) {
@@ -439,20 +470,35 @@ void interpret() {
                     printf("copying rhs : \n");
                     tree_print_raw(&rules_forest, rules.rhs[r]);
                     printf("\n");
-                    copy_rhs_tree(r);
+                    node_id subtree_id = copy_rhs_tree(r);
+                    size_t src_tree_size = tree_size(src, id);
+                    int offset = tree_size(dst, subtree_id) - src_tree_size;
+                    for(int i = id + src_tree_size; i < src->node_count; i++) {
+                        rewrite_node_map[i] += offset;
+                    }
+                    dst->parents[subtree_id] = current_parent;
                     rewritten = 1;
                     break;
                 }
                     
             }
-            if(!rewritten) {
-                printf("raw copying : \n");
-                tree_print_flat(src, id);
-                printf("\n");
-                copy_tree(dst, src, id);
+            if(rewritten) {
+                id += tree_size(src, id);
             }
-            id += tree_size(src, id);
+            if(!rewritten) {
+                current_parent = rewrite_node_map[src->parents[id]];
+                node_id last_node = new_child_node(dst, src->symbols[id], current_parent);
+                printf("raw copying : \n");
+                sym_print(src->symbols[id]);
+                printf("\n");
+                id += 1;
+                
+            }
+            
         }
+        printf("******* dst : ***************************************************\n");
+        forest_print_raw(dst);
+        printf("*****************************************************************\n");
         swap_arenas();
     } while(rewritten);
 }
@@ -473,6 +519,7 @@ int main(int argc, char *argv[]) {
     arena2 = alloc_forest(ARENA_NODES_MAX);
     dst = &arena2;
     registers_forest = alloc_forest(REGISTERS_FOREST_NODES_MAX);
+    rewrite_node_map = alloc(sizeof(node_id) * ARENA_NODES_MAX);
 
     init_rules();
 
