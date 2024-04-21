@@ -2,4 +2,4 @@
 2024-04-18 1h45min + 2h
 2024-04-19 2h15min
 2024-04-20 2h20min + 1h55min
-2024-04-21 (rewrite tree structure) - 2h45min
+2024-04-21 (rewrite tree structure) - 2h45min + 25 min

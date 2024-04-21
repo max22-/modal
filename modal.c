@@ -65,9 +65,13 @@ typedef struct node {
     symbol sym;
 } node_t;
 
+
+
 #define NODES_MAX 0x10000
 static node_t forest[NODES_MAX];
 static unsigned int free_list[NODES_MAX], free_list_ptr = 0;
+
+#define IS_ROOT(x) (forest[(x)].p == (x))
 
 static void init_forest() {
     for(node_id i = 0; i < NODES_MAX; i++)
@@ -127,9 +131,11 @@ static int up(node_id *id) {
 }
 
 static int down(node_id *id) {
+    printf("down(%d)\n", *id);
     for(int i = 0; i < NODES_MAX; i++) {
-        if(forest[i].p == *id) {
+        if(forest[i].p == *id && i != *id) {
             *id = i;
+            printf("result=%d\n", i);
             return 1;
         }
     }
@@ -144,13 +150,24 @@ static int left(node_id *id) {
 }
 
 static int right(node_id *id) {
+    printf("right(%d)\n", *id);
     for(int i = 0; i < NODES_MAX; i++) {
-        if(forest[i].l == *id) {
+        if(forest[i].l == *id && i != *id) {
+            printf("result = %d\n", i);
+            sym_print(forest[i].sym);
+            printf("\n");
             *id = i;
             return 1;
         }
     }
+    printf("fail\n");
     return 0;
+}
+
+static node_id rightmost_child(node_id id) {
+    assert(id < NODES_MAX);
+    while(right(&id));
+    return id;
 }
 
 /* Graphviz **************************************************************** */
@@ -254,15 +271,30 @@ node_id parse(node_id tokens_root) {
 
     node_id cp = -1, cl = -1;
     do {
+        printf("id = %d\n", id);
         symbol sym = forest[id].sym;
-        if(sym == OPEN_PAREN)
+        if(sym == OPEN_PAREN) {
             cp = new_node(cp, -1, sym);
+            cl = -1;
+        }
         else if(sym == CLOSE_PAREN) {
             if(cp == -1) {
-                ERROR("")
+                ERROR("unexpected ')'");
+                exit(1);
+            } else if(IS_ROOT(id))
+                cp = -1;
+            else {
+                cp = forest[id].p;
+                cl = rightmost_child(cp);
             }
+        } else {
+            cl = new_node(cp, cl, sym);
         }
     } while(right(&id));
+
+    #warning TODO: free tokens tree
+
+    return id;
 
     /* *** old code ***
     for(node_id i= 0; i < src->node_count; i++) {
@@ -315,7 +347,10 @@ int main(int argc, char *argv[]) {
     node_id tokens = tokenize(f);
     fclose(f);
 
+    node_id ast = parse(tokens);
+
     graphviz("tokens.dot");
+    graphviz("ast.dot");
 
     return 0;
 }
