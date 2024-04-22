@@ -107,8 +107,9 @@ static node_id new_node(node_id p, node_id l, symbol sym) {
 }
 
 static void free_node(node_id id) {
+    printf("free_node(%d)\n", id);
     #ifndef NDEBUG
-    for(node_id i = 0; i < NODES_MAX; i++) {
+    for(node_id i = 0; i < free_list_ptr; i++) {
         if(free_list[i] == id) {
             ERROR("node %d already freed", id);
             exit(1);
@@ -121,9 +122,23 @@ static void free_node(node_id id) {
     forest[id].p = -1;
 }
 
+static void dfpo_next(node_id *id);
+
+static void free_tree(node_id id) {
+    node_id tmp_id = id;
+    dfpo_next(&tmp_id);
+    while(tmp_id != id) {
+        node_id saved = tmp_id;
+        dfpo_next(&tmp_id);
+        free_node(saved);
+    };
+    free_node(tmp_id);
+}
+
 /* Tree walking ************************************************************ */
 
 static int up(node_id *id) {
+    assert(*id >= 0 && *id < NODES_MAX);
     node_id p = forest[*id].p;
     if(p == *id) return 0;
     *id = p;
@@ -131,6 +146,7 @@ static int up(node_id *id) {
 }
 
 static int down(node_id *id) {
+    assert(*id >= 0 && *id < NODES_MAX);
     printf("down(%d)\n", *id);
     for(int i = 0; i < NODES_MAX; i++) {
         if(forest[i].p == *id && i != *id) {
@@ -143,6 +159,7 @@ static int down(node_id *id) {
 }
 
 static int left(node_id *id) {
+    assert(*id >= 0 && *id < NODES_MAX);
     node_id l = forest[*id].l;
     if(l == *id) return 0;
     *id = l;
@@ -150,8 +167,10 @@ static int left(node_id *id) {
 }
 
 static int right(node_id *id) {
+    assert(*id >= 0 && *id < NODES_MAX);
     printf("right(%d)\n", *id);
     for(int i = 0; i < NODES_MAX; i++) {
+        if(i == 159) printf("left(159) = %d\n", forest[i].l);
         if(forest[i].l == *id && i != *id) {
             printf("result = %d\n", i);
             sym_print(forest[i].sym);
@@ -164,10 +183,30 @@ static int right(node_id *id) {
     return 0;
 }
 
-static node_id rightmost_child(node_id id) {
-    assert(id < NODES_MAX);
-    while(right(&id));
-    return id;
+static void bottom(node_id *id) {
+    assert(*id >= 0 && *id < NODES_MAX);
+    while(down(id));
+}
+
+static int rightmost(node_id *id) {
+    assert(*id >= 0 && *id < NODES_MAX);
+    node_id saved = *id;
+    assert(saved < NODES_MAX);
+    while(right(id));
+    return saved != *id;
+}
+
+/* depth-first post-order traversal */
+static void dfpo_next(node_id *id) {
+    assert(*id >= 0 && *id < NODES_MAX);
+    if(IS_ROOT(*id)) {
+        bottom(id);
+        return;
+    }
+    if(right(id))
+        bottom(id);
+    else
+        up(id);
 }
 
 /* Graphviz **************************************************************** */
@@ -269,56 +308,37 @@ node_id parse(node_id tokens_root) {
         exit(1);
     }
 
-    node_id cp = -1, cl = -1;
+    node_id ast = new_node(-1, -1, OPEN_PAREN);
+
+    node_id cp = ast, cl = -1;
     do {
         printf("id = %d\n", id);
         symbol sym = forest[id].sym;
         if(sym == OPEN_PAREN) {
-            cp = new_node(cp, -1, sym);
+            cp = new_node(cp, cl, sym);
             cl = -1;
         }
         else if(sym == CLOSE_PAREN) {
-            if(cp == -1) {
+            if(cp == ast) {
                 ERROR("unexpected ')'");
                 exit(1);
-            } else if(IS_ROOT(id))
-                cp = -1;
-            else {
-                cp = forest[id].p;
-                cl = rightmost_child(cp);
+            } else {
+                cl = cp;
+                rightmost(&cl);
+                up(&cp);
+                
             }
         } else {
             cl = new_node(cp, cl, sym);
         }
     } while(right(&id));
 
-    #warning TODO: free tokens tree
-
-    return id;
-
-    /* *** old code ***
-    for(node_id i= 0; i < src->node_count; i++) {
-        symbol sym = src->symbols[i];
-        if(sym == OPEN_PAREN) {
-            if(current_parent == -1)
-                current_parent = new_root_node(dst, sym);
-            else
-                current_parent = new_child_node(dst, sym, current_parent);
-        } else if(sym == CLOSE_PAREN) {
-            if(current_parent == -1)
-                ERROR("unexpected ')'");
-            else if(IS_ROOT(dst, current_parent))
-                current_parent = -1;
-            else
-                current_parent = dst->parents[current_parent];
-        } else {
-            if(current_parent == -1)
-                new_root_node(dst, sym);
-            else
-                new_child_node(dst, sym, current_parent);
-        }
+    if(cp != ast) {
+        ERROR("missing ')'");
+        exit(1);
     }
-    */
+
+    return ast;
 }
 
 int main(int argc, char *argv[]) {
@@ -350,7 +370,11 @@ int main(int argc, char *argv[]) {
     node_id ast = parse(tokens);
 
     graphviz("tokens.dot");
+    free_tree(tokens);
     graphviz("ast.dot");
+    free_tree(ast);
+
+    printf("free_list_ptr = 0x%x\n", free_list_ptr);
 
     return 0;
 }
