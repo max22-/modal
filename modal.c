@@ -107,7 +107,6 @@ static node_id new_node(node_id p, node_id l, symbol sym) {
 }
 
 static void free_node(node_id id) {
-    printf("free_node(%d)\n", id);
     #ifndef NDEBUG
     for(node_id i = 0; i < free_list_ptr; i++) {
         if(free_list[i] == id) {
@@ -147,11 +146,9 @@ static int up(node_id *id) {
 
 static int down(node_id *id) {
     assert(*id >= 0 && *id < NODES_MAX);
-    printf("down(%d)\n", *id);
     for(int i = 0; i < NODES_MAX; i++) {
         if(forest[i].p == *id && i != *id) {
             *id = i;
-            printf("result=%d\n", i);
             return 1;
         }
     }
@@ -168,18 +165,12 @@ static int left(node_id *id) {
 
 static int right(node_id *id) {
     assert(*id >= 0 && *id < NODES_MAX);
-    printf("right(%d)\n", *id);
     for(int i = 0; i < NODES_MAX; i++) {
-        if(i == 159) printf("left(159) = %d\n", forest[i].l);
         if(forest[i].l == *id && i != *id) {
-            printf("result = %d\n", i);
-            sym_print(forest[i].sym);
-            printf("\n");
             *id = i;
             return 1;
         }
     }
-    printf("fail\n");
     return 0;
 }
 
@@ -209,9 +200,44 @@ static void dfpo_next(node_id *id) {
         up(id);
 }
 
+/* removes a subtree from a tree, without freeing it (the goal is to paste it afterwards) */
+static void cut(node_id id) {
+    assert(id >= 0 && id < NODES_MAX);
+    node_id left_sibling = id, right_sibling = id;
+    left(&left_sibling);
+    right(&right_sibling);
+    if(right_sibling != id) {
+        if(left_sibling != id)
+            forest[right_sibling].l = left_sibling;
+        else
+            forest[right_sibling].l = right_sibling;
+    }
+    forest[id].l = id;
+    forest[id].p = id;
+}
+
+static void delete(node_id id) {
+    assert(id >= 0 && id < NODES_MAX);
+    cut(id);
+    free_tree(id);
+}
+
+static void append_child(node_id parent, node_id child) {
+    assert(parent >= 0 && parent < NODES_MAX);
+    assert(child >= 0 && child < NODES_MAX);
+    forest[child].p = parent;
+    node_id id = parent;
+    if(!down(&id)) {
+        forest[child].l = child;
+    } else {
+        rightmost(&id);
+        forest[child].l = id;
+    }
+}
+
 /* Graphviz **************************************************************** */
 
-int is_free(node_id id) {
+static int is_free(node_id id) {
     for(node_id i = 0; i <= free_list_ptr; i++) {
         if(free_list[i] == id)
             return 1;
@@ -219,7 +245,7 @@ int is_free(node_id id) {
     return 0;
 }
 
-void graphviz(const char *path) {
+static void graphviz(const char *path) {
     FILE *f = fopen(path, "w");
     if(!f) {
         ERROR("failed to open %s", path);
@@ -231,10 +257,38 @@ void graphviz(const char *path) {
             symbol sym;
             node_id p = forest[i].p;
             sym = forest[p].sym;
-            printf("i = %d, p=%d, parent sym = ", i, p);
-            sym_print(sym);
-            printf("\n");
             fprintf(f, "\"%d '", p);
+            fwrite(strings[sym].ptr, strings[sym].len, 1, f);
+            fprintf(f, "'\" -> ");
+            sym = forest[i].sym;
+            fprintf(f, "\"%d '", i);
+            fwrite(strings[sym].ptr, strings[sym].len, 1, f);
+            fprintf(f, "'\";\n");
+        }
+    }
+    fprintf(f, "}\n");
+    fclose(f);
+}
+
+static void graphviz_parent_sibling(const char *path) {
+    FILE *f = fopen(path, "w");
+    if(!f) {
+        ERROR("failed to open %s", path);
+        exit(1);
+    }
+    fprintf(f, "digraph G {\n");
+    for(node_id i = 0; i < NODES_MAX; i++) {
+        if(!is_free(i)) {
+            symbol sym;
+            node_id p = forest[i].p;
+            node_id l = forest[i].l;
+            node_id src_id;
+            if(l == i)
+                src_id = p;
+            else
+                src_id = l;
+            sym = forest[src_id].sym;
+            fprintf(f, "\"%d '", src_id);
             fwrite(strings[sym].ptr, strings[sym].len, 1, f);
             fprintf(f, "'\" -> ");
             sym = forest[i].sym;
@@ -249,7 +303,7 @@ void graphviz(const char *path) {
 
 /* Parsing ***************************************************************** */
 
-node_id tokenize(FILE *f) {
+static node_id tokenize(FILE *f) {
     char scratch[1024];
     size_t char_count = 0;
     node_id root = new_node(-1, -1, OPEN_PAREN);
@@ -298,7 +352,44 @@ node_id tokenize(FILE *f) {
     return root;
 }
 
-node_id parse(node_id tokens_root) {
+static void parse_rule(node_id rules, node_id location) {
+    assert(forest[location].sym == DEFINE);
+    node_id token = location;
+    if(!right(&location))
+        ERROR("unexpected <> at end of file");
+    node_id lhs = location;
+    if(!right(&location))
+        ERROR("unexpected end of file in rule definition");
+    node_id rhs = location;
+    node_id rule = new_node(-1, -1, OPEN_PAREN);
+    cut(lhs);
+    cut(rhs);
+    delete(token);
+    append_child(rule, lhs);
+    append_child(rule, rhs);
+    append_child(rules, rule);
+}
+
+static node_id parse_rules(node_id ast) {
+    node_id id = ast;
+    node_id rules = new_node(-1, -1, OPEN_PAREN);
+    if(!down(&id))
+        return;
+    int stop = 0;
+    do {
+        if(forest[id].sym == DEFINE) {
+            node_id next = id;
+            stop = !right(&next) || !right(&next) || !right(&next);
+            parse_rule(rules, id);
+            id = next;
+        } else {
+            stop = !right(&id);
+        }
+    } while(!stop);
+    return rules;
+}
+
+static node_id parse(node_id tokens_root) {
     node_id id = tokens_root;
     if(!down(&id)) {
         ERROR("no tokens");
@@ -309,7 +400,6 @@ node_id parse(node_id tokens_root) {
 
     node_id cp = ast, cl = -1;
     do {
-        printf("id = %d\n", id);
         symbol sym = forest[id].sym;
         if(sym == OPEN_PAREN) {
             cp = new_node(cp, cl, sym);
@@ -369,9 +459,17 @@ int main(int argc, char *argv[]) {
     graphviz("tokens.dot");
     free_tree(tokens);
     graphviz("ast.dot");
-    free_tree(ast);
+    graphviz_parent_sibling("ast2.dot");
 
-    printf("free_list_ptr = 0x%x\n", free_list_ptr);
+    node_id rules = parse_rules(ast);
+    free_tree(ast);
+    graphviz("rules.dot");
+    free_tree(rules);
+    graphviz("leak.dot");
+    if(free_list_ptr == NODES_MAX - 1)
+        printf("all nodes freed successfully\n");
+    else
+        printf("%u nodes were not freed\n", NODES_MAX - free_list_ptr - 1);
 
     return 0;
 }
