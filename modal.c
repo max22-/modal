@@ -245,7 +245,6 @@ void graphviz(const char *path) {
     }
     fprintf(f, "}\n");
     fclose(f);
-
 }
 
 /* Parsing ***************************************************************** */
