@@ -117,7 +117,7 @@ static void free_node(node_id id) {
     }
     #endif
     assert(free_list_ptr < NODES_MAX - 1);
-    free_list[free_list_ptr++] = id;
+    free_list[++free_list_ptr] = id;
     forest[id].l = -1;
     forest[id].p = -1;
 }
