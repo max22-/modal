@@ -229,7 +229,6 @@ void graphviz(const char *path) {
     for(node_id i = 0; i < NODES_MAX; i++) {
         if(!is_free(i)) {
             symbol sym;
-
             node_id p = forest[i].p;
             sym = forest[p].sym;
             printf("i = %d, p=%d, parent sym = ", i, p);
@@ -238,7 +237,6 @@ void graphviz(const char *path) {
             fprintf(f, "\"%d '", p);
             fwrite(strings[sym].ptr, strings[sym].len, 1, f);
             fprintf(f, "'\" -> ");
-
             sym = forest[i].sym;
             fprintf(f, "\"%d '", i);
             fwrite(strings[sym].ptr, strings[sym].len, 1, f);
