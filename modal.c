@@ -427,6 +427,72 @@ static node_id parse(node_id tokens_root) {
     return ast;
 }
 
+/* Interpreter ************************************************************* */
+
+enum move2_result {FAIL=-1, SAME_END, SAME_FORWARD};
+
+#define MOVE2(dir) \
+    static int dir ## 2(node_id *id1, node_id *id2) { \
+        node_id t1 = *id1, t2 = *id2; \
+        int res1 = dir(&t1), res2 = dir(&t2); \
+        if(res1 != res2) { \
+            return FAIL; \
+        } else if(res1 == 1) { \
+            *id1 = t1; \
+            *id2 = t2; \
+            return SAME_FORWARD; \
+        } else return SAME_END; \
+    }
+
+MOVE2(down)
+MOVE2(right)
+MOVE2(leftmost)
+
+static int match(node_id id1, node_id id2) {
+    assert(id1 >= 0 && id1 < NODES_MAX);
+    assert(id2 >= 0 && id2 < NODES_MAX);
+    node_id c1 = id1, c2 = id2; /* 'c' for cursor */
+    if(forest[c1].sym != forest[c2].sym)
+        return 0;
+    switch(down2(&c1, &c2)) {
+        case FAIL:
+            return 0;
+        case SAME_END:
+            return 1;
+        case SAME_FORWARD:
+            break;
+        default:
+            ERROR("unreachable");
+    }
+    while(1) {
+        if(forest[c1].sym != forest[c2].sym)
+            return 0;
+        switch(right2(&c1, &c2)) {
+            case FAIL:
+                return 0;
+            case SAME_END: {
+                leftmost2(&c1, &c2);
+                switch(down2(&c1, &c2)) {
+                    case FAIL:
+                        return 0;
+                    case SAME_END:
+                        return 1;
+                    case SAME_FORWARD:
+                        break;
+                    default:
+                        ERROR("unreachable");
+                }
+            }
+
+        }
+        
+    }
+}
+
+
+
+/*************************************************************************** */
+
 int main(int argc, char *argv[]) {
     if(argc != 2) {
         fprintf(stderr, "usage: %s file.modal\n", argv[0]);
