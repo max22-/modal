@@ -182,7 +182,6 @@ static void bottom(node_id *id) {
 static int rightmost(node_id *id) {
     assert(*id >= 0 && *id < NODES_MAX);
     node_id saved = *id;
-    assert(saved < NODES_MAX);
     while(right(id));
     return saved != *id;
 }
